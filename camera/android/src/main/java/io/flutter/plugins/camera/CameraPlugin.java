@@ -244,7 +244,10 @@ public class CameraPlugin implements MethodCallHandler {
       case "startJpegImageStream":
         {
           try {
-            camera.startPreviewWithJpegImageStream();
+            final boolean horizontalFlip = call.argument("horizontalFlip");
+            final boolean verticalFlip = call.argument("verticalFlip");
+            final int rotation = call.argument("rotation");
+            camera.startPreviewWithJpegImageStream(horizontalFlip, verticalFlip, rotation);
             result.success(null);
           } catch (CameraAccessException e) {
             result.error("CameraAccess", e.getMessage(), null);
@@ -887,7 +890,7 @@ public class CameraPlugin implements MethodCallHandler {
           null);
     }
 
-    private void startPreviewWithJpegImageStream() throws CameraAccessException {
+    private void startPreviewWithJpegImageStream(final boolean horizontalFlip, final boolean verticalFlip, final int rotation) throws CameraAccessException {
       closeCaptureSession();
 
       SurfaceTexture surfaceTexture = textureEntry.surfaceTexture();
@@ -931,10 +934,10 @@ public class CameraPlugin implements MethodCallHandler {
           },
           null);
 
-      registerJpegImageStreamEventChannel();
+      registerJpegImageStreamEventChannel(horizontalFlip, verticalFlip, rotation);
     }
 
-    private void registerJpegImageStreamEventChannel() {
+    private void registerJpegImageStreamEventChannel(final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
       final EventChannel imageStreamChannel =
           new EventChannel(registrar.messenger(), "plugins.flutter.io/camera/imageStream");
 
@@ -942,7 +945,7 @@ public class CameraPlugin implements MethodCallHandler {
           new EventChannel.StreamHandler() {
             @Override
             public void onListen(Object o, EventChannel.EventSink eventSink) {
-              setJpegImageStreamImageAvailableListener(eventSink);
+              setJpegImageStreamImageAvailableListener(eventSink, horizontalFlip, verticalFlip, rotation);
             }
 
             @Override
@@ -952,7 +955,7 @@ public class CameraPlugin implements MethodCallHandler {
           });
     }
 
-    private void setJpegImageStreamImageAvailableListener(final EventChannel.EventSink eventSink) {
+    private void setJpegImageStreamImageAvailableListener(final EventChannel.EventSink eventSink, final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
       imageStreamReader.setOnImageAvailableListener(
           new ImageReader.OnImageAvailableListener() {
             @Override
@@ -960,7 +963,7 @@ public class CameraPlugin implements MethodCallHandler {
               Image img = reader.acquireLatestImage();
               if (img == null) return;
 
-              Bitmap bitmap = YUV_420_888_toRGBIntrinsics_and_rotate(img);
+              Bitmap bitmap = YUV_420_888_toRGBIntrinsics_and_rotate(img, horizontalFlip, verticalFlip, rotation);
               ByteArrayOutputStream stream = new ByteArrayOutputStream();
               bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream);
               byte[] imageBuffer = stream.toByteArray();
@@ -972,7 +975,7 @@ public class CameraPlugin implements MethodCallHandler {
           null);
     }
 
-    private Bitmap YUV_420_888_toRGBIntrinsics_and_rotate(Image image) {
+    private Bitmap YUV_420_888_toRGBIntrinsics_and_rotate(Image image, final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
       if (image == null) return null;
 
       int W = image.getWidth();
@@ -1010,10 +1013,14 @@ public class CameraPlugin implements MethodCallHandler {
       out.copyTo(bmpout);
       image.close();
 
-      Matrix matrix = new Matrix();
-      matrix.postRotate(-90);
-      Bitmap scaledBitmap = Bitmap.createScaledBitmap(bmpout, bmpout.getWidth(), bmpout.getHeight(), true);
-      return Bitmap.createBitmap(scaledBitmap, 0, 0, scaledBitmap.getWidth(), scaledBitmap.getHeight(), matrix, true);
+      if (!horizontalFlip && !verticalFlip && rotation == 0) {
+        return bmpout;
+      } else {
+        Matrix matrix = new Matrix();
+        matrix.setRotate(rotation);
+        matrix.postScale(horizontalFlip ? -1 : 1, verticalFlip ? -1 : 1, bmpout.getWidth() / 2f, bmpout.getHeight() / 2f);
+        return Bitmap.createBitmap(bmpout, 0, 0, bmpout.getWidth(), bmpout.getHeight(), matrix, false);        
+      }
     }
 
     private void sendErrorEvent(String errorDescription) {

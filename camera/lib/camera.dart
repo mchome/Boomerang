@@ -372,7 +372,11 @@ class CameraController extends ValueNotifier<CameraValue> {
   }
 
   Future<void> startJpegImageStream(
-      onLatestJpegImageAvailable onAvailable) async {
+    onLatestJpegImageAvailable onAvailable, {
+    bool horizontalFlip = false,
+    bool verticalFlip = false,
+    int rotation = 0,
+  }) async {
     if (!value.isInitialized || _isDisposed) {
       throw CameraException(
         'Uninitialized CameraController',
@@ -393,7 +397,11 @@ class CameraController extends ValueNotifier<CameraValue> {
     }
 
     try {
-      await _channel.invokeMethod<void>('startJpegImageStream');
+      await _channel.invokeMethod<void>('startJpegImageStream', {
+        'horizontalFlip': horizontalFlip,
+        'verticalFlip': verticalFlip,
+        'rotation': rotation,
+      });
       value = value.copyWith(isStreamingImages: true);
     } on PlatformException catch (e) {
       throw CameraException(e.code, e.message);
