@@ -57,6 +57,7 @@ import android.renderscript.ScriptIntrinsicYuvToRGB;
 import android.renderscript.Allocation;
 import android.renderscript.Type;
 import android.renderscript.Element;
+import android.graphics.Matrix;
 
 public class CameraPlugin implements MethodCallHandler {
 
@@ -959,7 +960,7 @@ public class CameraPlugin implements MethodCallHandler {
               Image img = reader.acquireLatestImage();
               if (img == null) return;
 
-              Bitmap bitmap = YUV_420_888_toRGBIntrinsics(img);
+              Bitmap bitmap = YUV_420_888_toRGBIntrinsics_and_rotate(img);
               ByteArrayOutputStream stream = new ByteArrayOutputStream();
               bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream);
               byte[] imageBuffer = stream.toByteArray();
@@ -971,7 +972,7 @@ public class CameraPlugin implements MethodCallHandler {
           null);
     }
 
-    private Bitmap YUV_420_888_toRGBIntrinsics(Image image) {
+    private Bitmap YUV_420_888_toRGBIntrinsics_and_rotate(Image image) {
       if (image == null) return null;
 
       int W = image.getWidth();
@@ -1008,7 +1009,11 @@ public class CameraPlugin implements MethodCallHandler {
       yuvToRgbIntrinsic.forEach(out);
       out.copyTo(bmpout);
       image.close();
-      return bmpout;
+
+      Matrix matrix = new Matrix();
+      matrix.postRotate(-90);
+      Bitmap scaledBitmap = Bitmap.createScaledBitmap(bmpout, bmpout.getWidth(), bmpout.getHeight(), true);
+      return Bitmap.createBitmap(scaledBitmap, 0, 0, scaledBitmap.getWidth(), scaledBitmap.getHeight(), matrix, true);
     }
 
     private void sendErrorEvent(String errorDescription) {

@@ -41,7 +41,7 @@ class _MainPageState extends State<MainPage> {
     return Scaffold(
       appBar: AppBar(title: Text('Boomerang poc')),
       body: Center(
-        child: _camera != null && _enableCameraPreview
+        child: _camera != null && _enableCameraPreview && _image != null
             // ? AspectRatio(
             //     aspectRatio: _camera.value.aspectRatio,
             //     child: CameraPreview(_camera),
