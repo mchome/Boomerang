@@ -376,7 +376,13 @@ class CameraController extends ValueNotifier<CameraValue> {
     bool horizontalFlip = false,
     bool verticalFlip = false,
     int rotation = 0,
+    int compressionRatio = 100,
   }) async {
+    assert(horizontalFlip != null);
+    assert(verticalFlip != null);
+    assert(rotation != null);
+    assert(compressionRatio > 0);
+
     if (!value.isInitialized || _isDisposed) {
       throw CameraException(
         'Uninitialized CameraController',
@@ -401,6 +407,7 @@ class CameraController extends ValueNotifier<CameraValue> {
         'horizontalFlip': horizontalFlip,
         'verticalFlip': verticalFlip,
         'rotation': rotation,
+        'compressionRatio': compressionRatio,
       });
       value = value.copyWith(isStreamingImages: true);
     } on PlatformException catch (e) {
@@ -414,6 +421,28 @@ class CameraController extends ValueNotifier<CameraValue> {
         onAvailable(imageData);
       },
     );
+  }
+
+  Future<Uint8List> yuv420ToJpeg(
+    CameraImage image, {
+    bool horizontalFlip = false,
+    bool verticalFlip = false,
+    int rotation = 0,
+    int compressionRatio = 100,
+  }) async {
+    assert(horizontalFlip != null);
+    assert(verticalFlip != null);
+    assert(rotation != null);
+    assert(compressionRatio > 0);
+
+    Uint8List _image = await _channel.invokeMethod<Uint8List>('yuv420ToJpeg', {
+      'image': image.toYuvMap(),
+      'horizontalFlip': horizontalFlip,
+      'verticalFlip': verticalFlip,
+      'rotation': rotation,
+      'compressionRatio': compressionRatio,
+    });
+    return _image;
   }
 
   /// Stop streaming images from platform camera.

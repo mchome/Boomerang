@@ -247,7 +247,8 @@ public class CameraPlugin implements MethodCallHandler {
             final boolean horizontalFlip = call.argument("horizontalFlip");
             final boolean verticalFlip = call.argument("verticalFlip");
             final int rotation = call.argument("rotation");
-            camera.startPreviewWithJpegImageStream(horizontalFlip, verticalFlip, rotation);
+            final int compressionRatio = call.argument("compressionRatio");
+            camera.startPreviewWithJpegImageStream(horizontalFlip, verticalFlip, rotation, compressionRatio);
             result.success(null);
           } catch (CameraAccessException e) {
             result.error("CameraAccess", e.getMessage(), null);
@@ -262,6 +263,17 @@ public class CameraPlugin implements MethodCallHandler {
           } catch (CameraAccessException e) {
             result.error("CameraAccess", e.getMessage(), null);
           }
+          break;
+        }
+      case "yuv420ToJpeg":
+        {
+          final Map<String, Object> image = call.argument("image");
+          final boolean horizontalFlip = call.argument("horizontalFlip");
+          final boolean verticalFlip = call.argument("verticalFlip");
+          final int rotation = call.argument("rotation");
+          final int compressionRatio = call.argument("compressionRatio");
+          byte[] img = camera.yuv420ToJpeg(image, horizontalFlip, verticalFlip, rotation, compressionRatio);
+          result.success(img);
           break;
         }
       case "dispose":
@@ -301,6 +313,27 @@ public class CameraPlugin implements MethodCallHandler {
         return true;
       }
       return false;
+    }
+  }
+
+  private class ImageBufferOutput {
+    final private int width;
+    final private int height;
+    final private byte[] buffer;
+
+    ImageBufferOutput(int width, int height, byte[] buffer) {
+      this.width = width;
+      this.height = height;
+      this.buffer = buffer;
+    }
+    public int getWidth () {
+      return width;
+    }
+    public int getHeight () {
+      return height;
+    }
+    public byte[] getBuffer () {
+      return buffer;
     }
   }
 
@@ -890,7 +923,7 @@ public class CameraPlugin implements MethodCallHandler {
           null);
     }
 
-    private void startPreviewWithJpegImageStream(final boolean horizontalFlip, final boolean verticalFlip, final int rotation) throws CameraAccessException {
+    private void startPreviewWithJpegImageStream(final boolean horizontalFlip, final boolean verticalFlip, final int rotation, final int compressionRatio) throws CameraAccessException {
       closeCaptureSession();
 
       SurfaceTexture surfaceTexture = textureEntry.surfaceTexture();
@@ -934,10 +967,10 @@ public class CameraPlugin implements MethodCallHandler {
           },
           null);
 
-      registerJpegImageStreamEventChannel(horizontalFlip, verticalFlip, rotation);
+      registerJpegImageStreamEventChannel(horizontalFlip, verticalFlip, rotation, compressionRatio);
     }
 
-    private void registerJpegImageStreamEventChannel(final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
+    private void registerJpegImageStreamEventChannel(final boolean horizontalFlip, final boolean verticalFlip, final int rotation, final int compressionRatio) {
       final EventChannel imageStreamChannel =
           new EventChannel(registrar.messenger(), "plugins.flutter.io/camera/imageStream");
 
@@ -945,7 +978,7 @@ public class CameraPlugin implements MethodCallHandler {
           new EventChannel.StreamHandler() {
             @Override
             public void onListen(Object o, EventChannel.EventSink eventSink) {
-              setJpegImageStreamImageAvailableListener(eventSink, horizontalFlip, verticalFlip, rotation);
+              setJpegImageStreamImageAvailableListener(eventSink, horizontalFlip, verticalFlip, rotation, compressionRatio);
             }
 
             @Override
@@ -955,7 +988,7 @@ public class CameraPlugin implements MethodCallHandler {
           });
     }
 
-    private void setJpegImageStreamImageAvailableListener(final EventChannel.EventSink eventSink, final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
+    private void setJpegImageStreamImageAvailableListener(final EventChannel.EventSink eventSink, final boolean horizontalFlip, final boolean verticalFlip, final int rotation, final int compressionRatio) {
       imageStreamReader.setOnImageAvailableListener(
           new ImageReader.OnImageAvailableListener() {
             @Override
@@ -963,9 +996,18 @@ public class CameraPlugin implements MethodCallHandler {
               Image img = reader.acquireLatestImage();
               if (img == null) return;
 
-              Bitmap bitmap = YUV_420_888_toRGBIntrinsics_and_rotate(img, horizontalFlip, verticalFlip, rotation);
+              ImageBufferOutput data = imageToBuffer(img);
+              img.close();
+              Bitmap bitmap = YUV_420_888ToRGBIntrinsicsAndRotate(
+                data.getBuffer(),
+                data.getWidth(),
+                data.getHeight(),
+                horizontalFlip,
+                verticalFlip,
+                rotation
+              );
               ByteArrayOutputStream stream = new ByteArrayOutputStream();
-              bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream);
+              bitmap.compress(Bitmap.CompressFormat.JPEG, compressionRatio, stream);
               byte[] imageBuffer = stream.toByteArray();
 
               eventSink.success(imageBuffer);
@@ -975,7 +1017,23 @@ public class CameraPlugin implements MethodCallHandler {
           null);
     }
 
-    private Bitmap YUV_420_888_toRGBIntrinsics_and_rotate(Image image, final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
+    private byte[] yuv420ToJpeg(final Map<String, Object> image, final boolean horizontalFlip, final boolean verticalFlip, final int rotation, final int compressionRatio) {
+      Bitmap bitmap = YUV_420_888ToRGBIntrinsicsAndRotate(
+        (byte[]) image.get("buffer"),
+        (int) image.get("width"),
+        (int) image.get("height"),
+        horizontalFlip,
+        verticalFlip,
+        rotation
+      );
+      ByteArrayOutputStream stream = new ByteArrayOutputStream();
+      bitmap.compress(Bitmap.CompressFormat.JPEG, compressionRatio, stream);
+      byte[] imageBuffer = stream.toByteArray();
+
+      return imageBuffer;
+    }
+
+    private ImageBufferOutput imageToBuffer(final Image image) {
       if (image == null) return null;
 
       int W = image.getWidth();
@@ -989,12 +1047,18 @@ public class CameraPlugin implements MethodCallHandler {
       int Ub = U.getBuffer().remaining();
       int Vb = V.getBuffer().remaining();
 
-      byte[] data = new byte[Yb + Ub + Vb];
+      byte[] buffer = new byte[Yb + Ub + Vb];
 
-      Y.getBuffer().get(data, 0, Yb);
-      V.getBuffer().get(data, Yb, Vb);
-      U.getBuffer().get(data, Yb + Vb, Ub);
+      Y.getBuffer().get(buffer, 0, Yb);
+      V.getBuffer().get(buffer, Yb, Vb);
+      U.getBuffer().get(buffer, Yb + Vb, Ub);
 
+      ImageBufferOutput data = new ImageBufferOutput(W, H, buffer);
+
+      return data;
+    }
+
+    private Bitmap YUV_420_888ToRGBIntrinsicsAndRotate(final byte[] data, final int W, final int H, final boolean horizontalFlip, final boolean verticalFlip, final int rotation) {
       RenderScript rs = RenderScript.create(activity);
       ScriptIntrinsicYuvToRGB yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(rs, Element.U8_4(rs));
 
@@ -1011,7 +1075,6 @@ public class CameraPlugin implements MethodCallHandler {
       yuvToRgbIntrinsic.setInput(in);
       yuvToRgbIntrinsic.forEach(out);
       out.copyTo(bmpout);
-      image.close();
 
       if (!horizontalFlip && !verticalFlip && rotation == 0) {
         return bmpout;

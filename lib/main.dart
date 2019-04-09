@@ -18,18 +18,19 @@ class MainPage extends StatefulWidget {
 
 class _MainPageState extends State<MainPage> {
   CameraController _camera;
-  bool _enableCameraPreview = false;
-  Uint8List _image;
+  List<CameraDescription> _cameras = [];
+
   int _lastTimestamp = 0;
   int _time = 0;
-  List<CameraDescription> _cameras = [];
-  bool _isFrontCamera = true;
+  bool _enableCameraPreview = false;
+  List<CameraImage> _cameraImages = [];
+  List<Uint8List> _convertedImages = [];
 
   void initState() {
     super.initState();
     availableCameras().then((List<CameraDescription> cameras) {
       _cameras = cameras;
-      _setupFrontCamera();
+      _setupCamera();
     });
   }
 
@@ -38,18 +39,14 @@ class _MainPageState extends State<MainPage> {
     _camera?.dispose();
   }
 
-  Future<void> _setupFrontCamera() async {
-    await _camera?.dispose();
-    _camera = CameraController(_cameras.firstWhere((CameraDescription camera) {
-      return camera.lensDirection == CameraLensDirection.front;
-    }), ResolutionPreset.low);
-    await _camera.initialize();
-  }
+  Future<void> _setupCamera({
+    CameraLensDirection cameraLensDirection: CameraLensDirection.back,
+  }) async {
+    assert(cameraLensDirection != null);
 
-  Future<void> _setupBackCamera() async {
     await _camera?.dispose();
     _camera = CameraController(_cameras.firstWhere((CameraDescription camera) {
-      return camera.lensDirection == CameraLensDirection.back;
+      return camera.lensDirection == cameraLensDirection;
     }), ResolutionPreset.low);
     await _camera.initialize();
   }
@@ -59,53 +56,110 @@ class _MainPageState extends State<MainPage> {
     return Scaffold(
       appBar: AppBar(title: Text('Boomerang poc')),
       body: Center(
-        child: _camera != null && _enableCameraPreview && _image != null
-            // ? AspectRatio(
-            //     aspectRatio: _camera.value.aspectRatio,
-            //     child: CameraPreview(_camera),
-            //   )
-            ? GestureDetector(
-                onTap: () async {
-                  if (_isFrontCamera)
-                    await _setupBackCamera();
-                  else
-                    await _setupFrontCamera();
-
-                  setState(() => _isFrontCamera = !_isFrontCamera);
-                  _setupCameraPreview();
-                },
-                child: Image.memory(_image, gaplessPlayback: true),
+        child: _camera != null && _enableCameraPreview
+            ? AspectRatio(
+                aspectRatio: _camera.value.aspectRatio,
+                child: CameraPreview(_camera),
               )
-            : Container(height: 200.0, width: 200.0, color: Colors.amber),
+            : Container(
+                height: 200.0,
+                width: 200.0,
+                color: Colors.lime,
+                alignment: Alignment.center,
+                child: Text('Ready'),
+              ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() => _enableCameraPreview = !_enableCameraPreview);
-          _setupCameraPreview();
-        },
-        child: _enableCameraPreview
-            ? Text(_time > 0 ? '${(1000 / _time).round()}fps' : '0fps')
-            : Icon(Icons.camera),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          FloatingActionButton(
+            onPressed: () {
+              setState(() => _enableCameraPreview = !_enableCameraPreview);
+              _setupCameraPreviewNew();
+            },
+            tooltip: 'After recording.',
+            child: _enableCameraPreview
+                ? Text('${_time > 0 ? (1000 / _time).round() : 0}fps')
+                : Icon(Icons.camera),
+          ),
+          SizedBox(height: 20),
+          FloatingActionButton(
+            onPressed: () {
+              setState(() => _enableCameraPreview = !_enableCameraPreview);
+              _setupCameraPreview();
+            },
+            tooltip: 'During recording.',
+            child: _enableCameraPreview
+                ? Text('${_time > 0 ? (1000 / _time).round() : 0}fps')
+                : Icon(Icons.camera),
+          ),
+        ],
       ),
     );
   }
 
-  void _setupCameraPreview() {
-    _enableCameraPreview
-        ? _camera.startJpegImageStream(
-            (Uint8List image) async {
-              setState(() {
-                this._image = image;
-                if (_lastTimestamp > 0) {
-                  this._time =
-                      DateTime.now().millisecondsSinceEpoch - _lastTimestamp;
-                }
-              });
-              _lastTimestamp = DateTime.now().millisecondsSinceEpoch;
+  Future<void> _setupCameraPreview() async {
+    if (_enableCameraPreview) {
+      _convertedImages = [];
+      _camera.startJpegImageStream(
+        (Uint8List image) async {
+          setState(() {
+            _convertedImages.add(image);
+            if (_lastTimestamp > 0)
+              _time = DateTime.now().millisecondsSinceEpoch - _lastTimestamp;
+          });
+          _lastTimestamp = DateTime.now().millisecondsSinceEpoch;
+        },
+        rotation: 90,
+      );
+    } else {
+      _camera.stopImageStream();
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return ListView.builder(
+            itemCount: _convertedImages.length,
+            itemBuilder: (BuildContext context, int index) {
+              return Image.memory(_convertedImages[index]);
             },
-            horizontalFlip: _isFrontCamera,
-            rotation: _isFrontCamera ? -90 : 90,
-          )
-        : _camera.stopImageStream();
+          );
+        },
+      );
+    }
+  }
+
+  Future<void> _setupCameraPreviewNew() async {
+    if (_enableCameraPreview) {
+      _cameraImages = [];
+      _camera.startImageStream(
+        (CameraImage image) async {
+          setState(() {
+            _cameraImages.add(image);
+            if (_lastTimestamp > 0)
+              _time = DateTime.now().millisecondsSinceEpoch - _lastTimestamp;
+          });
+          _lastTimestamp = DateTime.now().millisecondsSinceEpoch;
+        },
+      );
+    } else {
+      _camera.stopImageStream();
+      Iterable<Future<Uint8List>> _result = _cameraImages.map(
+        (CameraImage _cameraImage) {
+          return _camera.yuv420ToJpeg(_cameraImage, rotation: 90);
+        },
+      );
+      _convertedImages = await Future.wait(_result);
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return ListView.builder(
+            itemCount: _convertedImages.length,
+            itemBuilder: (BuildContext context, int index) {
+              return Image.memory(_convertedImages[index]);
+            },
+          );
+        },
+      );
+    }
   }
 }

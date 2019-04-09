@@ -142,4 +142,17 @@ class CameraImage {
   ///
   /// The number of planes is determined by the format of the image.
   final List<Plane> planes;
+
+  Map<String, dynamic> toYuvMap() {
+    List<int> buffer = [];
+    buffer.addAll(planes[0].bytes);
+    buffer.addAll(planes[2].bytes);
+    buffer.addAll(planes[1].bytes);
+
+    return {
+      'height': height,
+      'width': width,
+      'buffer': Uint8List.fromList(buffer),
+    };
+  }
 }
